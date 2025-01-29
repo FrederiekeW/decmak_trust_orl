@@ -1,0 +1,93 @@
+model {
+  
+  mu_a_rew ~ dnorm(0,1)T(0,1)
+  mu_a_pun ~ dnorm(0,1)T(0,1)
+  mu_theta ~ dnorm(0,1)T(0,)
+  mu_omega_f ~ dnorm(0,.1)
+  mu_T_weight ~ dnorm(0,.1)
+
+  lambda_a_rew ~ dgamma(.01,.01)
+  lambda_a_pun ~ dgamma(.01,.01)
+  lambda_theta ~ dgamma(.01,.01)
+  lambda_omega_f ~ dgamma(.01,.01)
+  lambda_T_weight ~ dgamma(.01,.01)
+  
+  # more informed priors (that hopefully fit the SD used in the simulation a bit better)
+  #lambda_a_rew ~ dgamma(2.5/2,.01/2)
+  #lambda_a_pun ~ dgamma(2.5/2,.01/2)
+  #lambda_theta ~ dgamma(2.5/2,.01/2)
+  #lambda_omega_f ~ dgamma(2.5/2,.01/2)
+  
+  
+  for (s in 1:nsubs) {
+
+    a_rew[s] ~ dnorm(mu_a_rew,lambda_a_rew)
+    a_pun[s] ~ dnorm(mu_a_pun,lambda_a_pun)
+    theta[s] ~ dnorm(mu_theta,lambda_theta) # set to 1 in order to simplify model
+    omega_f[s] ~ dnorm(mu_omega_f,lambda_omega_f)
+    T_weight[s] ~ dnorm(mu_T_weight, lambda_T_weight)
+    
+    #------ set t1 model variables --------------------------
+      
+    T_update1[s] <- 1 + T_weight[s]  # bad deck
+    T_update2[s] <- 1 + T_weight[s]  # bad 
+    T_update3[s] <- 1 - T_weight[s]  # good deck
+    T_update4[s] <- 1 - T_weight[s]  # good
+    
+    Ev[s,1, 1] <- 0.25 * T_update1[s] 
+    Ev[s,1, 2] <- 0.25 * T_update2[s] 
+    Ev[s,1, 3] <- 0.25 * T_update3[s] 
+    Ev[s,1, 4] <- 0.25 * T_update4[s] 
+    
+    Ef[s,1, 1] <- 0.25 * T_update1[s] 
+    Ef[s,1, 2] <- 0.25 * T_update2[s] 
+    Ef[s,1, 3] <- 0.25 * T_update3[s] 
+    Ef[s,1, 4] <- 0.25 * T_update4[s] 
+    
+    p[s,1, 1] <- 0.25 * T_update1[s] 
+    p[s,1, 2] <- 0.25 * T_update2[s] 
+    p[s,1, 3] <- 0.25 * T_update3[s] 
+    p[s,1, 4] <- 0.25 * T_update4[s] 
+    
+    for (b in 2:nblocks) {
+  
+      signX[s, b] <- ifelse(NetScore[s, b-1] < 0, -1, 1)
+      
+      # -------- Updating expected values and frequencies ------------------------
+      for (d in 1:4) {
+        Ev_update[s,b,d] <- ifelse(NetScore[s,b-1] >= 0,
+                                  Ev[s,b-1,d] + a_rew[s] * (NetScore[s,b-1]*score_weight[s,b,d] - Ev[s,b-1,d]), 
+                                  Ev[s,b-1,d] + a_pun[s] * (NetScore[s,b-1]*score_weight[s,b,d] - Ev[s,b-1,d])
+        )
+                              
+        Ev[s,b,d] <- ifelse(sum(d == x[s,b-1,])>0, Ev_update[s,b,d], Ev[s,b-1,d])
+        
+        # ------------------- EF -------------------------------------------
+        Ef_cho[s,b,d] <- ifelse(NetScore[s,b-1] >= 0, 
+                                Ef[s,b-1,d] + a_rew[s] * (signX[s,b]*score_weight[s,b,d] - Ef[s,b-1,d]),
+                                Ef[s,b-1,d] + a_pun[s] * (signX[s,b]*score_weight[s,b,d] - Ef[s,b-1,d])
+        )
+        
+        Ef_not[s,b,d] <- ifelse(NetScore[s,b-1] >= 0, 
+                                Ef[s,b-1,d] + a_pun[s] * (-(signX[s,b]/3)*score_weight[s, b,d] - Ef[s,b-1,d]),
+                                Ef[s,b-1,d] + a_rew[s] * (-(signX[s,b]/3)*score_weight[s,b,d] - Ef[s,b-1,d])
+        ) 
+        
+        Ef[s,b,d] <- ifelse(sum(d == x[s,b-1,])>0, Ef_cho[s,b,d], Ef_not[s,b,d])  
+      } #deck close
+  
+      # Compute probabilities for the block
+      for (d in 1:4) { #d open
+        exp_p[s,b, d] <- exp(theta[s] * (Ev[s,b-1, d] + Ef[s,b-1, d] * omega_f[s]))
+      } #d close
+      for (d in 1:4) { #d open
+        p[s,b, d] <- exp_p[s,b, d] / sum(exp_p[s,b, ])
+      } # d close
+  
+      # -------------------------- Make a choice for the block -------------------------
+      for (i in 1:blocksize) {
+        x[s,b, i] ~ dcat(p[s,b, ])  # Make a choice
+      }
+    }
+  } 
+}

@@ -1,0 +1,73 @@
+model {
+
+  a_rew ~ dunif(0,1)
+  a_pun ~ dunif(0,1)
+  T_weight ~ dunif(0,1)
+  theta ~ dnorm(0,.1)T(0,)
+  omega_f ~ dnorm(0,.01)
+
+  #------ set t1 model variables --------------------------
+    
+  T_update1 <- 1 + T_weight  # bad deck
+  T_update2 <- 1 + T_weight  # bad 
+  T_update3 <- 1 - T_weight  # good deck
+  T_update4 <- 1 - T_weight  # good
+  
+  Ev[1, 1] <- 0.25 * T_update1
+  Ev[1, 2] <- 0.25 * T_update2
+  Ev[1, 3] <- 0.25 * T_update3
+  Ev[1, 4] <- 0.25 * T_update4
+  
+  Ef[1, 1] <- 0.25 * T_update1
+  Ef[1, 2] <- 0.25 * T_update2
+  Ef[1, 3] <- 0.25 * T_update3
+  Ef[1, 4] <- 0.25 * T_update4
+  
+  p[1, 1] <- 0.25 * T_update1
+  p[1, 2] <- 0.25 * T_update2
+  p[1, 3] <- 0.25 * T_update3
+  p[1, 4] <- 0.25 * T_update4
+  
+  for (b in 2:nblocks) {
+  
+    signX[b] <- ifelse(NetScore[b-1] < 0, -1, 1)
+
+    # -------- Updating expected values and frequencies ------------------------
+    for (d in 1:4) {
+      Ev_update[b,d] <- ifelse(NetScore[b-1] >= 0,
+                                Ev[b-1,d] + a_rew * (NetScore[b-1]*score_weight[b,d] - Ev[b-1,d]), 
+                                Ev[b-1,d] + a_pun * (NetScore[b-1]*score_weight[b,d] - Ev[b-1,d])
+      )
+                            
+      Ev[b,d] <- ifelse(sum(d == x[b-1,])>0, Ev_update[b,d], Ev[b-1,d])
+      
+      # ------------------- EF -------------------------------------------
+      Ef_cho[b,d] <- ifelse(NetScore[b-1] >= 0, 
+                              Ef[b-1,d] + a_rew * (signX[b]*score_weight[b,d] - Ef[b-1,d]),
+                              Ef[b-1,d] + a_pun * (signX[b]*score_weight[b,d] - Ef[b-1,d])
+      )
+      
+      Ef_not[b,d] <- ifelse(NetScore[b-1] >= 0, 
+                              Ef[b-1,d] + a_pun * (-(signX[b]/3)*score_weight[ b,d] - Ef[b-1,d]),
+                              Ef[b-1,d] + a_rew * (-(signX[b]/3)*score_weight[b,d] - Ef[b-1,d])
+      ) 
+      
+      Ef[b,d] <- ifelse(sum(d == x[b-1,])>0, Ef_cho[b,d], Ef_not[b,d])  
+    }
+
+    # Compute probabilities for the block
+    for (d in 1:4) {
+      exp_p[b, d] <- exp(theta * (Ev[b-1, d] + Ef[b-1, d] * omega_f))
+    }
+    for (d in 1:4) {
+      p[b, d] <- exp_p[b, d] / sum(exp_p[b, ])
+    }
+
+    # -------------------------- Make a choice for the block -------------------------
+    for (i in 1:blocksize) {
+      x[b, i] ~ dcat(p[b, ])  # Make a choice
+    }
+    
+  }
+  
+}
